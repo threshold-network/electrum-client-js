@@ -77,7 +77,8 @@ class SocketClient {
       if (msg.id !== void 0) {
         this.response(msg)
       } else {
-        this.subscribe.emit(msg.method, msg.params)
+        // Notifications use EventEmitter on `events` (see example/subscribe.js).
+        this.events.emit(msg.method, msg.params)
       }
     }
   }
