@@ -1,0 +1,126 @@
+# Scheduled upstream-sync workflow for threshold-network/electrum-client-js
+# (the fork proposed by P4 of docs/keep-network-dependency-plan.md).
+#
+# Drop this at .github/workflows/sync-upstream.yml in the new fork repo once
+# it exists. It never auto-merges: every run either finds nothing to sync, or
+# opens/updates a single PR for a human to review and merge, clean or
+# conflicted. This touches the Bitcoin protocol data path, so human review is
+# mandatory before anything lands on the fork's default branch.
+name: Sync electrum-client-js fork from upstream
+
+on:
+  schedule:
+    # Daily at 06:00 UTC. Upstream (keep-network/electrum-client-js) merges
+    # real commits fairly often (5 in March 2026 alone per the dependency
+    # plan) - daily keeps each sync PR small and easy to review, and the job
+    # itself is cheap to run for a repo this size.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  UPSTREAM_REPO: https://github.com/keep-network/electrum-client-js.git
+  UPSTREAM_BRANCH: main
+  DEFAULT_BRANCH: main
+  SYNC_BRANCH: sync/upstream-electrum-client-js
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.DEFAULT_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream "$UPSTREAM_REPO"
+          git fetch upstream "$UPSTREAM_BRANCH"
+
+      - name: Check whether upstream has new commits
+        id: check
+        run: |
+          UPSTREAM_SHA=$(git rev-parse "upstream/$UPSTREAM_BRANCH")
+          MERGE_BASE=$(git merge-base HEAD "upstream/$UPSTREAM_BRANCH")
+          echo "upstream_sha=$UPSTREAM_SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream_short=${UPSTREAM_SHA:0:7}" >> "$GITHUB_OUTPUT"
+          if [ "$UPSTREAM_SHA" = "$MERGE_BASE" ]; then
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Report no-op run
+        if: steps.check.outputs.has_changes == 'false'
+        run: |
+          echo "Fork is already up to date with upstream ($UPSTREAM_BRANCH @ ${{ steps.check.outputs.upstream_short }}). Nothing to sync."
+
+      - name: Create sync branch from default branch
+        if: steps.check.outputs.has_changes == 'true'
+        run: git checkout -B "$SYNC_BRANCH"
+
+      # Merge upstream in, but never auto-resolve a conflict: this fork's own
+      # two fixes (notification EventEmitter rename, server.version-before-
+      # server.banner connection order) are exactly the kind of change a
+      # careless automatic resolution could silently drop, on the Bitcoin
+      # data path. On conflict, flatten the unmerged index state with
+      # `git add -A` so the literal `<<<<<<<` conflict markers land in the PR
+      # diff for a human to resolve - do not attempt any automatic
+      # resolution here.
+      - name: Attempt merge from upstream
+        if: steps.check.outputs.has_changes == 'true'
+        id: merge
+        run: |
+          if git merge --no-commit --no-ff "upstream/$UPSTREAM_BRANCH"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            git add -A
+          fi
+
+      # peter-evans/create-pull-request commits whatever is currently staged
+      # (from the merge step above) onto SYNC_BRANCH, pushes it, and opens or
+      # updates the PR. Reusing a fixed branch name means a second run before
+      # the first PR is merged updates the same PR instead of piling up
+      # duplicates. Nothing here auto-merges.
+      - name: Open pull request for human review
+        if: steps.check.outputs.has_changes == 'true'
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          committer: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          author: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+          branch: ${{ env.SYNC_BRANCH }}
+          base: ${{ env.DEFAULT_BRANCH }}
+          delete-branch: true
+          commit-message: "Sync from upstream keep-network/electrum-client-js@${{ steps.check.outputs.upstream_short }}"
+          title: >-
+            ${{ steps.merge.outputs.conflict == 'true' && '[CONFLICT] ' || '' }}Sync from upstream (keep-network/electrum-client-js@${{ steps.check.outputs.upstream_short }})
+          body: |
+            Automated sync from [`keep-network/electrum-client-js`](${{ env.UPSTREAM_REPO }}) @ `${{ steps.check.outputs.upstream_sha }}`.
+
+            ${{ steps.merge.outputs.conflict == 'true' && 'Merge conflict: upstream changed code also touched by the connection-order and event-emitter fixes already applied in this fork. Conflict markers are committed as-is in the diff below - resolve them manually before merging.' || 'Clean merge: no conflicts against the fixes already applied in this fork. Please review before merging - this touches Bitcoin protocol data on the live transaction path.' }}
+
+            This PR was opened automatically by the upstream-sync workflow and is never auto-merged. A human must review and merge it.
+          labels: |
+            upstream-sync
+          draft: false
+
+      - name: Label conflicted sync PRs
+        if: steps.check.outputs.has_changes == 'true' && steps.merge.outputs.conflict == 'true' && steps.cpr.outputs.pull-request-number
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh pr edit "${{ steps.cpr.outputs.pull-request-number }}" --add-label merge-conflict --repo "${{ github.repository }}"
