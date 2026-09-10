@@ -18,15 +18,17 @@ class ElectrumClient extends SocketClient {
         // Connect to Electrum Server.
         await super.connect()
 
-        // Get banner.
-        const banner = await this.server_banner()
-        console.log(banner)
-
-        // Negotiate protocol version.
+        // server.version must be sent before any other request - Fulcrum and
+        // ElectrumX reject server.banner (and other requests) issued before
+        // protocol version negotiation completes.
         if (clientName && electrumProtocolVersion) {
           const version = await this.server_version(clientName, electrumProtocolVersion)
           console.log(`Negotiated version: [${version}]`)
         }
+
+        // Get banner.
+        const banner = await this.server_banner()
+        console.log(banner)
       } catch (err) {
         throw new Error(`failed to connect to electrum server: [${err}]`)
       }
