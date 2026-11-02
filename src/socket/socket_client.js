@@ -41,7 +41,12 @@ class SocketClient {
     }
 
     this.status = 1
-    return this.client.connect()
+    try {
+      return await this.client.connect()
+    } catch (error) {
+      this.status = 0
+      throw error
+    }
   }
 
   close() {

@@ -3,20 +3,25 @@
   "version": "0.1.1",
   "description": "Electrum protocol client for node.js and browser",
   "main": "index.js",
+  "files": [
+    "index.js",
+    "src/"
+  ],
   "scripts": {
-    "test": "mocha --timeout 10000",
+    "test": "npm run test:unit",
+    "test:unit": "mocha --timeout 10000 test/socket_client_ws_test.js",
+    "test:integration": "mocha --timeout 10000 test/integration_test.js",
     "lint": "eslint .",
     "lint:fix": "eslint --fix ."
   },
   "dependencies": {
-    "websocket": "^1.0.29"
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "chai": "^4.2.0",
     "electrum-host-parse": "^0.1.1",
     "eslint": "^6.1.0",
     "eslint-config-google": "^0.13.0",
-    "fs": "0.0.1-security",
     "mocha": "^6.2.3"
   },
   "homepage": "https://github.com/keep-network/electrum-client-js#readme",
@@ -33,7 +38,7 @@
     "bitcoin"
   ],
   "engines": {
-    "node": ">=6"
+    "node": ">=22.4.0"
   },
   "author": "Yuki Akiyama",
   "license": "MIT"
