@@ -3,7 +3,7 @@ const ElectrumClient = require('../.')
 const chai = require('chai')
 const assert = chai.assert
 
-const fs = require('fs')
+const fs = require('node:fs')
 
 const {servers} = require('./config')
 
